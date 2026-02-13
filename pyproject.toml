@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kunhwa-pdf-editor"
+version = "3.2.0"
+description = "Kunhwa PDF Editor - PDF 편집 및 관리 프로그램"
+requires-python = ">=3.9"
+license = {text = "Proprietary"}
+authors = [
+    {name = "TaeWoong Jang"}
+]
+
+dependencies = [
+    "PyMuPDF>=1.23.0",
+    "Pillow>=9.0.0",
+    "tkinterdnd2>=0.3.0",
+    "pywin32>=300; sys_platform == 'win32'",
+]
+
+[project.scripts]
+kunhwa-pdf-editor = "kunhwa_pdf_editor.app:main"
+
+[project.gui-scripts]
+kunhwa-pdf-editor-gui = "kunhwa_pdf_editor.app:main"
+
+[tool.setuptools.packages.find]
+include = ["kunhwa_pdf_editor*"]
+
+[tool.setuptools.package-data]
+kunhwa_pdf_editor = ["data/*.png", "data/*.ico"]

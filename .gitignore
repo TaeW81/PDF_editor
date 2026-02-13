@@ -8,9 +8,13 @@ __pycache__/
 # PyInstaller
 build/
 dist/
+build_*/
+dist_*/
+installer_output/
 *.spec.bak
 
 # Virtual Environment
+*.egg-info/
 venv/
 env/
 ENV/
@@ -38,5 +42,6 @@ Thumbs.db
 # 빌드 산출물
 *.exe
 *.pkg
+
 
 
