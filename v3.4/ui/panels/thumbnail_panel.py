@@ -32,8 +32,9 @@ class ThumbnailPanel(ttk.Frame):
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
         
-        self.canvas.pack(side=LEFT, fill=BOTH, expand=YES)
+        # Pack Scrollbar FIRST to ensure it reserves space
         self.scrollbar.pack(side=RIGHT, fill=Y)
+        self.canvas.pack(side=LEFT, fill=BOTH, expand=YES)
         
         self.canvas.bind("<Configure>", self._on_resize)
         
@@ -44,7 +45,17 @@ class ThumbnailPanel(ttk.Frame):
         self.bind("<Control-c>", lambda e: self.winfo_toplevel().on_copy())
         self.bind("<Control-v>", lambda e: self.winfo_toplevel().on_paste())
         
+        # Bind Map event to trigger initial refresh when actually visible
+        self.bind("<Map>", self._on_map_event)
+        self._first_map = True
+        
         # Mousewheel Focus Handling
+
+    def set_filename(self, filename):
+        if filename:
+            self.lbl_title.config(text=f"썸네일 - {filename}")
+        else:
+            self.lbl_title.config(text="썸네일")
 
     def scroll(self, delta):
         self.canvas.yview_scroll(int(-1*(delta/120)), "units")
@@ -64,16 +75,22 @@ class ThumbnailPanel(ttk.Frame):
 
     def deselect_all(self):
         self.selected_indices.clear()
-        self.on_selection_change(self.selected_indices)
-        self.refresh_selection_visuals()
-
-    def _on_resize(self, event):
-        self.canvas.itemconfig(self.canvas_window, width=event.width)
-        self.update_grid_layout()
-
+    def _on_map_event(self, event):
+        """Called when the widget becomes mapped (visible) on screen."""
+        if self._first_map and self.pdf.doc:
+            print("ThumbnailPanel Mapped - Triggering Initial Refresh")
+            self._first_map = False
+            # Force a refresh now that we have geometry
+            self.refresh()
+            
     def refresh(self):
+        # Clear existing
         for widget in self.scroll_frame.winfo_children():
             widget.destroy()
+        
+        # Ensure frame is above canvas background
+        self.scroll_frame.lift()
+        
         self.thumbnails.clear()
         self.thumb_widgets.clear()
         
@@ -81,38 +98,85 @@ class ThumbnailPanel(ttk.Frame):
             return
 
         for i in range(len(self.pdf.doc)):
-            # Frame style depends on selection
-            style = "primary" if i in self.selected_indices else "light"
-            
-            frame = ttk.Frame(self.scroll_frame, padding=5, bootstyle=style)
-            
-            pil_img = self.pdf.get_page_image(i, scale=self.scale)
-            if pil_img:
-                tk_img = ImageTk.PhotoImage(pil_img)
-                self.thumbnails.append(tk_img)
+            try:
+                # Frame style depends on selection
+                style = "primary" if i in self.selected_indices else "light"
                 
-                lbl_img = ttk.Label(frame, image=tk_img)
-                lbl_img.pack(side=TOP, pady=2)
-                self._bind_events(lbl_img, i)
-            
-            lbl_num = ttk.Label(frame, text=f"{i+1}", font=("Segoe UI", 9))
-            lbl_num.pack(side=BOTTOM)
-            self._bind_events(lbl_num, i)
-            
-            self._bind_events(frame, i)
-            self.thumb_widgets.append(frame)
+                frame = ttk.Frame(self.scroll_frame, padding=5, bootstyle=style)
+                
+                # Use consistent scale
+                pil_img = self.pdf.get_page_image(i, scale=self.scale)
+                if pil_img:
+                    tk_img = ImageTk.PhotoImage(pil_img)
+                    self.thumbnails.append(tk_img)
+                    
+                    lbl_img = ttk.Label(frame, image=tk_img)
+                    lbl_img.pack(side=TOP, pady=2)
+                    self._bind_events(lbl_img, i)
+                else:
+                    # Fallback
+                    lbl_img = ttk.Label(frame, text="Error", width=10)
+                    lbl_img.pack(side=TOP, pady=2)
+                
+                lbl_num = ttk.Label(frame, text=f"{i+1}", font=("Segoe UI", 9))
+                lbl_num.pack(side=BOTTOM)
+                self._bind_events(lbl_num, i)
+                
+                self._bind_events(frame, i)
+                self.thumb_widgets.append(frame)
+            except Exception as e:
+                print(f"Error loading thumbnail {i}: {e}")
 
+        # Update Grid
         self.update_grid_layout()
         
-    def update_grid_layout(self):
+        # Synchronously update scroll region to ensure visibility
+        self.scroll_frame.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+        # Reset Scroll to top AFTER region is set
+        self.canvas.yview_moveto(0)
+        
+    def _update_scrollregion(self):
+        # Kept for compatibility if used elsewhere, but refresh does it inline now
+        self.scroll_frame.update_idletasks()
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_resize(self, event):
+        self.canvas.itemconfig(self.canvas_window, width=event.width)
+        self.update_grid_layout(event.width)
+
+    def update_grid_layout(self, width=None):
         if not self.thumb_widgets: return
-        canvas_width = self.canvas.winfo_width()
-        if canvas_width < 50: canvas_width = 300
         
-        self.thumb_widgets[0].update_idletasks()
-        item_width = self.thumb_widgets[0].winfo_reqwidth() + 10
-        if item_width < 50: item_width = 150
+        # 1. Determine Canvas Width
+        if width is not None:
+             canvas_width = width
+        else:
+             canvas_width = self.canvas.winfo_width()
         
+        # Fallback / Minimum width
+        if canvas_width < 50: canvas_width = 300 
+        
+        # 2. Force the frame to match the calculated width
+        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+        # 3. Determine Item Width - Dynamic based on scale
+        # Base A4 width ~600px (at 1.0 scale). 
+        # item_width = Image Width + Padding/Border
+        # We use a base constant of 600 representing the image width at scale 1.0
+        # self.scale ranges from 0.1 to 2.0
+        
+        base_width = 600
+        image_width = int(base_width * self.scale)
+        padding = 20 # 10px each side approx
+        item_width = image_width + padding
+        
+        # Minimum safety
+        if item_width < 50: item_width = 50
+        
+        # 4. Grid Items
+        # Use simple integer division. 
         columns = max(1, canvas_width // item_width)
         
         for i, frame in enumerate(self.thumb_widgets):
@@ -164,71 +228,91 @@ class ThumbnailPanel(ttk.Frame):
 
     def _on_drag_start(self, event, index):
         self.drag_start_index = index
+        self.drag_start_pos = (event.x_root, event.y_root)
+        self.has_dragged = False
         
         # Check modifiers
+        # Note: In start, we might select immediately if modifiers are used.
+        # Logic: 
+        # Modifiers -> Immediate Action (Toggle/Range)
+        # No Modifier -> Deferred Action (Wait for Release to see if dragged)
+        
         if event.state & 0x0004: # Control
             # Toggle
             if index in self.selected_indices:
                 self.selected_indices.remove(index)
             else:
                 self.selected_indices.add(index)
+            self.on_selection_change(self.selected_indices)
+            self.refresh_selection_visuals()
+            
         elif event.state & 0x0001: # Shift
             # Range
             if self.selected_indices:
-                start = sorted(list(self.selected_indices))[-1] # From last clicked?
-                # A better approach requires tracking 'anchor'. For now:
-                if not hasattr(self, 'last_clicked_index'): self.last_clicked_index = 0
-                start = self.last_clicked_index
+                start = sorted(list(self.selected_indices))[-1] 
+                if hasattr(self, 'last_clicked_index'): 
+                    # Prefer anchor if we track it properly
+                    start = self.last_clicked_index
+                    
                 end = index
-                
-                # Select range
                 self.selected_indices = set(range(min(start, end), max(start, end) + 1))
             else:
                 self.selected_indices = {index}
+            self.on_selection_change(self.selected_indices)
+            self.refresh_selection_visuals()
+            
         else:
             # No modifier
-            # If item is NOT selected, select it (and deselect others).
-            # If item IS selected, don't deselect others YET (because we might be dragging multiple).
-            # But if we just click (release without drag), we want to select only this.
-            # This is the tricky part of DnD + Selection.
+            # If item is NOT selected, select it immediately (adding to others? No, standard is Select Only)
+            # Standard Explorer: Left down on unselected -> Select Only.
+            # Left down on SELECTED -> Do nothing (prepare to drag group).
             
             if index not in self.selected_indices:
                 self.selected_indices = {index}
-            # If it IS in selection, we keep it as is (so we can drag the group)
-            # BUT if we release without dragging, we should select only this.
-            # That requires logic in ButtonRelease.
-            
+                self.on_selection_change(self.selected_indices)
+                self.refresh_selection_visuals()
+                
         self.last_clicked_index = index
-        self.on_selection_change(self.selected_indices)
-        self.refresh_selection_visuals()
 
     def _on_drag_motion(self, event):
-        if self.drag_start_index is not None and self.drag_manager:
-            if not self.drag_manager.dragging:
-                # Start Global Drag
-                win = self.winfo_toplevel()
-                self.drag_manager.start_drag(win, self.selected_indices, event)
+        if self.drag_start_index is not None:
+            # Check Threshold
+            if not self.has_dragged:
+                dx = abs(event.x_root - self.drag_start_pos[0])
+                dy = abs(event.y_root - self.drag_start_pos[1])
+                if dx > 5 or dy > 5:
+                    self.has_dragged = True
+                    
+            if self.has_dragged and self.drag_manager:
+                if not self.drag_manager.dragging:
+                    # Start Global Drag
+                    win = self.winfo_toplevel()
+                    self.drag_manager.start_drag(win, self.selected_indices, event)
 
     def _on_drag_release(self, event):
-        # If we didn't drag (or dragged very little), and no modifiers were pressed,
-        # we should select ONLY the clicked item (deselect others).
-        # We need to know if it was a drag or a click.
-        # DragManager handles actual global drag stop.
-        # But locally, if drag_start_index is set but Global Drag didn't start...
+        # Click Logic (Mouse Up without Drag)
+        # Only for No-Modifier case where we deferred deselecting.
         
-        if self.drag_start_index is not None:
-             # Check if it was a simple click on a multi-selection
-             if not (event.state & 0x0004) and not (event.state & 0x0001):
-                 # No modifiers
-                 # If we are here, we might have skipped deselecting in start.
-                 # Only deselect if we didn't actually drag?
-                 if not self.drag_manager or not self.drag_manager.dragging:
-                     self.selected_indices = {self.drag_start_index}
-                     self.on_selection_change(self.selected_indices)
-                     self.refresh_selection_visuals()
+        if self.drag_start_index is not None and not self.has_dragged:
+             # It was a click.
+             
+             # Check modifiers again (just in case they were released? No, we care if they were used in start)
+             # But if I Ctrl+Click, logic ran in Start. Release does nothing.
+             # If I Click (No Mod), logic ran in Start for UNSELECTED.
+             # If I Click (No Mod) on SELECTED, Start did nothing. Release must Select Only it.
+             
+             is_ctrl = event.state & 0x0004
+             is_shift = event.state & 0x0001
+             
+             if not is_ctrl and not is_shift:
+                 # Select only this one (Deselect others)
+                 self.selected_indices = {self.drag_start_index}
+                 self.on_selection_change(self.selected_indices)
+                 self.refresh_selection_visuals()
 
         self.drag_start_index = None
-        pass
+        self.has_dragged = False
+        self.drag_start_pos = None
 
     def refresh_selection_visuals(self):
         for i, frame in enumerate(self.thumb_widgets):
@@ -241,32 +325,34 @@ class ThumbnailPanel(ttk.Frame):
             
         # Select
         self.selected_indices = {index}
-        self.refresh_selection_visuals() # Don't trigger on_selection_change to avoid loop if possible?
-        # If we trigger on_selection_change, it calls Preview.show_page. 
-        # If Preview called this, we have a loop!
-        # Pass a flag to suppress callback?
-        # Or just don't call on_selection_change here. 
-        # But we want to update status bar?
-        # Let's call it, but guard in MainWindow?
-        # Or Update PreviewPanel to not call callback if page is same?
+        self.refresh_selection_visuals() 
         
         # Scroll
         if 0 <= index < len(self.thumb_widgets):
             widget = self.thumb_widgets[index]
-            # Ensure layout is updated
             self.update_idletasks()
             
-            # Get widget position relative to scroll_frame
             y = widget.winfo_y()
             h = widget.winfo_height()
-            
-            # Get scrollframe height
             sf_h = self.scroll_frame.winfo_height()
             canvas_h = self.canvas.winfo_height()
             
             if sf_h > canvas_h:
-                # Center the item
                 target_y = y - (canvas_h - h) / 2
                 fraction = target_y / sf_h
                 fraction = max(0.0, min(1.0, fraction))
                 self.canvas.yview_moveto(fraction)
+
+    def get_index_at(self, x, y):
+        """Returns the index of the item at screen coordinates (x, y)."""
+        # Iterate all widgets and check intersection
+        # Since we have thumb_widgets list corresponding to indices
+        for i, widget in enumerate(self.thumb_widgets):
+            wx = widget.winfo_rootx()
+            wy = widget.winfo_rooty()
+            w = widget.winfo_width()
+            h = widget.winfo_height()
+            
+            if wx <= x <= wx + w and wy <= y <= wy + h:
+                return i
+        return -1

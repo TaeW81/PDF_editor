@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.settings import USERS_FILE
 
 PASSWORD = "KUNHWA2025"
-REMOTE_AUTH_URL = "https://raw.githubusercontent.com/TaeW81/PDF_editor/main/users.json.enc"
+REMOTE_AUTH_URL = "https://gist.githubusercontent.com/TaeW81/8c6597546e977140599d675c4760c298/raw"
 
 def get_mac_address():
     """Retrieves the system's MAC address with caching."""
@@ -46,100 +46,95 @@ def get_mac_address():
         print(f"Failed to get MAC address: {e}")
         return None
 
-def encrypt_data(text, password=PASSWORD):
-    """Encrypts text using simple XOR + Base64."""
-    try:
-        # Ensure text is string before encoding
-        if not isinstance(text, str):
-            text = json.dumps(text)
-            
-        data_bytes = text.encode('utf-8')
-        encrypted = bytearray()
-        for i, byte in enumerate(data_bytes):
-            key_byte = ord(password[i % len(password)])
-            encrypted.append(byte ^ key_byte)
-        return base64.b64encode(encrypted).decode('utf-8')
-    except Exception as e:
-        print(f"Encryption failed: {e}")
-        return None
 
-def decrypt_data(encrypted_text, password=PASSWORD):
-    """Decrypts text."""
-    try:
-        encrypted = base64.b64decode(encrypted_text.encode('utf-8'))
-        decrypted = bytearray()
-        for i, byte in enumerate(encrypted):
-            key_byte = ord(password[i % len(password)])
-            decrypted.append(byte ^ key_byte)
-        return decrypted.decode('utf-8')
-    except Exception as e:
-        print(f"Decryption failed: {e}")
-        return None
 
 User = collections.namedtuple('User', ['name', 'role', 'mac'])
 
+
 class AuthManager:
     def __init__(self, users_file=USERS_FILE):
+        # We no longer use users_file for storage, but keep arg using it or just ignore
         self.users_file = users_file
+        self.users_data = None # In-memory storage
         self.current_user = None
+        
+        # Cleanup local file if exists (Security)
+        if os.path.exists(self.users_file):
+            try:
+                os.remove(self.users_file)
+                print(f"Removed local user file: {self.users_file}")
+            except Exception as e:
+                print(f"Failed to remove local user file: {e}")
 
     def load_users(self):
-        """Loads users from encrypted file."""
-        if not os.path.exists(self.users_file):
-            return None
-        
-        try:
-            with open(self.users_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            decrypted = decrypt_data(content)
-            if decrypted:
-                return json.loads(decrypted)
-        except Exception as e:
-            print(f"Error loading users: {e}")
-            return None
+        """Returns in-memory users data."""
+        return self.users_data
 
     def fetch_remote_users(self):
-        """Fetches users file from remote server."""
+        """Fetches users from remote server and stores in memory."""
         if not REMOTE_AUTH_URL:
             return False
             
         try:
-            with urllib.request.urlopen(REMOTE_AUTH_URL, timeout=5) as response:
+            # Cache busting
+            import time
+            url_with_cache_bust = f"{REMOTE_AUTH_URL}?t={int(time.time())}"
+            print(f"Fetching from: {url_with_cache_bust}")
+            
+            with urllib.request.urlopen(url_with_cache_bust, timeout=10) as response:
                 if response.status == 200:
-                    data = response.read().decode('utf-8')
-                    # Validate if it decodes?
-                    # For now, just save it to local file
-                    with open(self.users_file, 'w', encoding='utf-8') as f:
-                        f.write(data)
-                    return True
+                    raw_data = response.read()
+                    
+                    # Robust Decoding
+                    data = None
+                    for encoding in ['utf-8', 'cp949', 'euc-kr']:
+                        try:
+                            data = raw_data.decode(encoding).strip()
+                            break
+                        except UnicodeDecodeError:
+                            continue
+                            
+                    if data is None:
+                        # Final fallback
+                        data = raw_data.decode('utf-8', errors='ignore').strip()
+                    
+                    try:
+                        # Direct JSON parse (No encryption)
+                        self.users_data = json.loads(data)
+                        print("Remote auth sync successful (Plain JSON).")
+                        return True
+                    except json.JSONDecodeError as e:
+                        print(f"Remote data is not valid JSON: {e}")
+                        # print(data[:100]) # Debug
+                        return False
         except Exception as e:
             print(f"Remote auth failed: {e}")
             return False
 
     def authenticate(self):
         """Checks if current machine is authorized."""
+        
         # Try to sync with server first
-        if REMOTE_AUTH_URL:
-            print(f"Checking remote auth: {REMOTE_AUTH_URL}")
-            self.fetch_remote_users()
+        # In In-Memory mode, if fetch fails and we have no data, we cannot auth.
+        success = self.fetch_remote_users()
+        
+        if not success and not self.users_data:
+             return False, "서버 연결 실패. 인터넷 연결을 확인해주세요."
             
         current_mac = get_mac_address()
         if not current_mac:
-            return False, "Could not determine MAC address."
+            return False, "MAC 주소를 확인할 수 없습니다."
 
         users_data = self.load_users()
         if not users_data or "users" not in users_data:
-            # Check if file serves purely as a key or requires specific entries
-            # For this app, we need the file to exist and contain the user
-            return False, f"User database not found at {self.users_file}."
+            return False, f"사용자 정보가 없습니다.\nMAC: {current_mac}"
 
         for user in users_data["users"]:
             if user["mac"] == current_mac:
                 self.current_user = User(name=user["name"], role=user["role"], mac=user["mac"])
-                return True, f"Welcome, {user['name']}"
+                return True, f"반갑습니다, {user['name']}님"
 
-        return False, f"Access Denied. MAC: {current_mac}"
+        return False, f"인증되지 않은 사용자입니다.\nMAC: {current_mac}"
 
     def get_current_user_name(self):
         return self.current_user.name if self.current_user else "Unknown"
@@ -148,20 +143,22 @@ class AuthManager:
         return self.current_user and self.current_user.role == 'admin'
 
     def save_users(self, users_data):
-        """Saves users data to encrypted file."""
+        """Updates in-memory data (Does not save to file)."""
+        self.users_data = users_data
+        return True
+
+    def get_users_json_string(self):
+        """Returns plain JSON string of current memory data for Export."""
+        if not self.users_data:
+            return ""
         try:
-            content = json.dumps(users_data, ensure_ascii=False, indent=2)
-            encrypted = encrypt_data(content)
-            
-            with open(self.users_file, 'w', encoding='utf-8') as f:
-                f.write(encrypted)
-            return True
+            return json.dumps(self.users_data, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"Error saving users: {e}")
-            return False
+            print(f"JSON dump failed: {e}")
+            return ""
 
     def add_user(self, name, role, mac):
-        """Adds a new user."""
+        """Adds a new user to memory."""
         users_data = self.load_users()
         if not users_data:
             users_data = {"users": [], "version": "1.0", "last_updated": ""}
@@ -169,7 +166,7 @@ class AuthManager:
         # Check duplicate
         for user in users_data["users"]:
             if user["mac"] == mac:
-                return False, "MAC Address already exists."
+                return False, "이미 등록된 MAC 주소입니다."
         
         users_data["users"].append({
             "name": name,
@@ -177,47 +174,57 @@ class AuthManager:
             "mac": mac
         })
         
-        if self.save_users(users_data):
-            return True, "User added successfully."
-        return False, "Failed to save user data."
+        self.save_users(users_data)
+        return True, "사용자가 추가되었습니다. (메모리 반영됨)"
 
-    def remove_user(self, mac):
-        """Removes a user by MAC."""
+
+    def update_user(self, original_mac, new_name, new_role, new_mac):
+        """Updates an existing user."""
         users_data = self.load_users()
         if not users_data:
-            return False, "No user data found."
+            return False, "사용자 데이터가 없습니다."
+            
+        # Find user
+        target_user = None
+        for u in users_data["users"]:
+            if u["mac"] == original_mac:
+                target_user = u
+                break
+                
+        if not target_user:
+            return False, "사용자를 찾을 수 없습니다."
+            
+        # Check duplicate MAC if changed
+        if original_mac != new_mac:
+            for u in users_data["users"]:
+                if u["mac"] == new_mac:
+                    return False, "이미 존재하는 MAC 주소입니다."
+                    
+        # Update
+        target_user["name"] = new_name
+        target_user["role"] = new_role
+        target_user["mac"] = new_mac
+        
+        self.save_users(users_data)
+        return True, "사용자 정보가 수정되었습니다."
+
+    def remove_user(self, mac):
+        """Removes a user by MAC from memory."""
+        users_data = self.load_users()
+        if not users_data:
+            return False, "사용자 데이터가 없습니다."
             
         initial_count = len(users_data["users"])
         users_data["users"] = [u for u in users_data["users"] if u["mac"] != mac]
         
         if len(users_data["users"]) == initial_count:
-            return False, "User not found."
+            return False, "사용자를 찾을 수 없습니다."
             
-        if self.save_users(users_data):
-            return True, "User removed successfully."
-        return False, "Failed to save user data."
+        self.save_users(users_data)
+        return True, "사용자가 삭제되었습니다. (메모리 반영됨)"
+
 
     def get_all_users(self):
         """Returns list of all users."""
         data = self.load_users()
         return data.get("users", []) if data else []
-        
-    def backup_users(self, backup_path):
-        import shutil
-        try:
-            if os.path.exists(self.users_file):
-                shutil.copy2(self.users_file, backup_path)
-                return True, "Backup successful."
-            return False, "User file does not exist."
-        except Exception as e:
-            return False, str(e)
-
-    def restore_users(self, backup_path):
-        import shutil
-        try:
-            if os.path.exists(backup_path):
-                shutil.copy2(backup_path, self.users_file)
-                return True, "Restore successful."
-            return False, "Backup file not found."
-        except Exception as e:
-            return False, str(e)

@@ -29,19 +29,46 @@ class PDFEngine:
         
         target_path = path if path else self.file_path
         try:
-            # Incremental save if overwriting and possible, else full save
+            # Incremental save if overwriting and possible, else full lossless save
             if target_path == self.file_path:
-                self.doc.saveIncr() # optimize?
+                try:
+                    self.doc.saveIncr() 
+                except:
+                    # Fallback to full save if incremental fails
+                    self.doc.save(target_path, deflate=True, garbage=0)
             else:
-                self.doc.save(target_path)
+                # Full save, deflate for lossless compression, no garbage collection to prevent recompression
+                self.doc.save(target_path, deflate=True, garbage=0)
             return True, "Saved successfully."
         except Exception as e:
             # If incremental save fails (e.g. major changes), try full save
             try:
-                self.doc.save(target_path)
+                self.doc.save(target_path, deflate=True, garbage=0)
                 return True, "Saved successfully (Full)."
             except Exception as e2:
                 return False, str(e2)
+
+    def save_subset(self, page_indices, path):
+        """Saves specific pages to a new PDF file."""
+        if not self.doc:
+            return False, "No document open."
+        
+        try:
+            new_doc = fitz.open()
+            # Sort indices to maintain order? Or follow selection order?
+            # User might select 3, 1, 2. Usually we want 1, 2, 3.
+            # But "Custom: 3, 1" might mean specific order.
+            # Let's trust the input list order.
+            
+            for idx in page_indices:
+                if 0 <= idx < len(self.doc):
+                    new_doc.insert_pdf(self.doc, from_page=idx, to_page=idx)
+            
+            new_doc.save(path, deflate=True, garbage=0)
+            new_doc.close()
+            return True, "Saved successfully."
+        except Exception as e:
+            return False, str(e)
 
     def close(self):
         if self.doc:

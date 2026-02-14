@@ -28,9 +28,22 @@ class PreviewPanel(ttk.Frame):
         # Zoom state
         self.zoom_scale = 1.0
 
-        # Mouse Wheel binding
         self.canvas.bind("<Control-MouseWheel>", self._on_zoom)
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Configure>", self._on_resize)
+        
+        # Show Logo on Startup
+        self.show_logo()
+
+    def _on_resize(self, event):
+        # Re-center image if visible
+        if self.photo_image:
+             self.show_page(self.current_page_index)
+        else:
+             # Re-center logo or text
+             x = event.width // 2
+             y = event.height // 2
+             self.canvas.coords("logo", x, y)
 
     def scroll(self, delta):
         # returns (start_fraction, end_fraction)
@@ -50,7 +63,11 @@ class PreviewPanel(ttk.Frame):
             self.change_page(1)
         else:
             # Just scroll content
-            self.canvas.yview_scroll(units, "units")
+            if self.photo_image:
+                 if delta > 0:
+                     self.canvas.yview_scroll(-1, "units")
+                 else:
+                     self.canvas.yview_scroll(1, "units")
 
     def change_page(self, offset):
         new_idx = self.current_page_index + offset
@@ -81,13 +98,13 @@ class PreviewPanel(ttk.Frame):
         # Refresh current page with new scale
         self.show_page(self.current_page_index)
 
-    def show_page(self, index):
+    def show_page(self, index, from_thumbnail=False):
         if not self.pdf.doc or not (0 <= index < len(self.pdf.doc)):
             return
 
         if self.current_page_index != index:
             self.current_page_index = index
-            if self.on_page_change:
+            if self.on_page_change and not from_thumbnail:
                 self.on_page_change(index)
         
         self.current_page_index = index
@@ -115,6 +132,46 @@ class PreviewPanel(ttk.Frame):
             self.canvas.create_image(x, y, anchor="nw", image=self.photo_image)
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
+    def fit_to_window(self):
+        """Fit the current page to the window size (Zoom to Fit)."""
+        if not self.pdf.doc or not (0 <= self.current_page_index < len(self.pdf.doc)):
+            return
+
+        c_width = self.canvas.winfo_width()
+        c_height = self.canvas.winfo_height()
+        
+        # Fallback if too small (not mapped yet)
+        if c_width < 50: 
+             c_width = 800
+             c_height = 600
+        
+        # Get page dimensions (72 DPI base)
+        page = self.pdf.doc[self.current_page_index]
+        rect = page.rect
+        p_width = rect.width
+        p_height = rect.height
+        
+        # Calculate scale
+        # Margin 20px
+        available_w = c_width - 20
+        available_h = c_height - 20
+        
+        if available_w <= 0: available_w = 780
+        if available_h <= 0: available_h = 580
+
+        scale_w = available_w / p_width
+        scale_h = available_h / p_height
+        
+        # Use the smaller scale to ensure it fits both dimensions
+        new_scale = min(scale_w, scale_h)
+        if new_scale <= 0: new_scale = 1.0
+        
+        # Update zoom scale
+        self.zoom_scale = new_scale
+        
+        # Refresh
+        self.show_page(self.current_page_index)
+
     def show_logo(self):
         import os
         # Try to find logo
@@ -125,32 +182,32 @@ class PreviewPanel(ttk.Frame):
         # Let's use config.settings.DATA_DIR if available, or relative path
         
         try:
-             # Go up 3 levels from ui/panels/preview_panel.py -> ui/panels -> ui -> v3.4
-             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-             logo_path = os.path.join(base_dir, "data", "kunhwa_logo.png")
-             
-             # Fallback to older location if needed
-             if not os.path.exists(logo_path):
-                  # Try d:/Gits/PDF_editor/data/kunhwa_logo.png
-                  logo_path = os.path.join(os.path.dirname(base_dir), "data", "kunhwa_logo.png")
+            # Go up 3 levels from ui/panels/preview_panel.py -> ui/panels -> ui -> v3.4
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            logo_path = os.path.join(base_dir, "data", "kunhwa_logo.png")
+            
+            # Fallback to older location if needed
+            if not os.path.exists(logo_path):
+                 # Try d:/Gits/PDF_editor/data/kunhwa_logo.png
+                 logo_path = os.path.join(os.path.dirname(base_dir), "data", "kunhwa_logo.png")
 
-             if os.path.exists(logo_path):
-                 img = Image.open(logo_path)
-                 # Resize to fit reasonable size
-                 img.thumbnail((400, 300))
-                 self.logo_image = ImageTk.PhotoImage(img) # Keep ref
-                 
-                 c_width = self.canvas.winfo_width()
-                 c_height = self.canvas.winfo_height()
-                 x = c_width // 2
-                 y = c_height // 2
-                 
-                 self.canvas.delete("all")
-                 self.canvas.create_image(x, y, anchor="center", image=self.logo_image)
-             else:
-                 self.canvas.delete("all")
-                 self.canvas.create_text(200, 200, text="Kunhwa PDF Editor", font=("Segoe UI", 20, "bold"), fill="gray")
-                 
+            if os.path.exists(logo_path):
+                img = Image.open(logo_path)
+                # Resize to fit reasonable size (Smaller as requested)
+                img.thumbnail((200, 150))
+                self.logo_image = ImageTk.PhotoImage(img) # Keep ref
+                
+                c_width = self.canvas.winfo_width()
+                c_height = self.canvas.winfo_height()
+                x = c_width // 2
+                y = c_height // 2
+                
+                self.canvas.delete("all")
+                self.canvas.create_image(x, y, anchor="center", image=self.logo_image, tags="logo")
+            else:
+                self.canvas.delete("all")
+                self.canvas.create_text(200, 200, text="Kunhwa PDF Editor", font=("Segoe UI", 20, "bold"), fill="gray", tags="logo")
+                
         except Exception as e:
              print(f"Logo error: {e}")
 
