@@ -415,7 +415,7 @@ class MainWindow(ttk.Toplevel):
         menubar.add_cascade(label="도움말", menu=help_menu)
         help_menu.add_command(label="사용법", command=self.show_usage_dialog)
         help_menu.add_separator()
-        help_menu.add_command(label="정보", command=lambda: messagebox.showinfo("정보", f"{APP_NAME} {VERSION}\nCreated by {AUTHOR}"))
+        help_menu.add_command(label="정보", command=lambda: messagebox.showinfo("정보", f"{APP_NAME} {VERSION}\nCreated by {AUTHOR}", parent=self))
     def on_open_pdf(self):
         path = filedialog.askopenfilename(filetypes=[("PDF 파일", "*.pdf")])
         if path:
@@ -509,11 +509,11 @@ class MainWindow(ttk.Toplevel):
         # Filename in footer too? No, title is enough.
         
         copyright_text = f"© 2025 {COMPANY} {VERSION} | Developed by {AUTHOR} | 사용자: {user}"
-        lbl_copy = ttk.Label(footer_frame, text=copyright_text, font=("Segoe UI", 8), bootstyle="secondary")
+        lbl_copy = ttk.Label(footer_frame, text=copyright_text, font=("맑은 고딕", 8), bootstyle="secondary")
         lbl_copy.pack(side=LEFT, padx=10, pady=5)
         
         # Status
-        self.status_bar = ttk.Label(footer_frame, text="준비", bootstyle="inverse-light", font=("Segoe UI", 9))
+        self.status_bar = ttk.Label(footer_frame, text="준비", bootstyle="inverse-light", font=("맑은 고딕", 9))
         self.status_bar.pack(side=RIGHT, padx=10, pady=5)
     def on_selection_change(self, selected_indices):
         count = len(selected_indices)
@@ -806,7 +806,7 @@ class MainWindow(ttk.Toplevel):
         dialog.geometry(f"+{x}+{y}")
         
         # 페이지 크기 선택
-        ttk.Label(dialog, text="페이지 크기를 선택하세요:", font=("Segoe UI", 10)).pack(pady=10)
+        ttk.Label(dialog, text="페이지 크기를 선택하세요:", font=("맑은 고딕", 10)).pack(pady=10)
         
         # A4 가로/세로, A3 가로/세로 버튼들
         ttk.Button(dialog, text="A4 가로 (297×210mm)", 
@@ -932,6 +932,8 @@ class MainWindow(ttk.Toplevel):
             messagebox.showinfo("목록", "사용자가 없습니다.")
             return
             
+        users.sort(key=lambda x: x['name'])
+        
         win = tk.Toplevel(self)
         win.title("사용자 목록")
         win.geometry("400x500")
@@ -999,6 +1001,9 @@ class MainWindow(ttk.Toplevel):
         if not users:
              messagebox.showinfo("알림", "관리할 사용자가 없습니다.")
              return
+             
+        users.sort(key=lambda x: x['name'])
+        
         dialog = tk.Toplevel(self)
         dialog.title("사용자 관리 (수정/삭제)")
         dialog.geometry("600x450")
@@ -1032,7 +1037,8 @@ class MainWindow(ttk.Toplevel):
         def refresh_list():
             for item in tree.get_children():
                 tree.delete(item)
-            for u in self.auth.get_all_users():
+            sorted_users = sorted(self.auth.get_all_users(), key=lambda x: x['name'])
+            for u in sorted_users:
                 tree.insert("", END, values=(u['name'], u['role'], u['mac']))
         def edit_user():
             selected_item = tree.selection()
@@ -1141,13 +1147,27 @@ class MainWindow(ttk.Toplevel):
         text_widget.insert("1.0", json_content)
         text_widget.config(state="disabled") # Read-only
         
+        def open_gist():
+            import webbrowser
+            # Gist URL for the user
+            gist_url = "https://gist.github.com/TaeW81/8c6597546e977140599d675c4760c298"
+            webbrowser.open(gist_url)
+            
+        link_lbl = ttk.Label(dialog, text="👉 여기를 눌러 Gist 페이지 바로가기", bootstyle="info", cursor="hand2", font=("맑은 고딕", 10, "underline"))
+        link_lbl.pack(pady=5)
+        link_lbl.bind("<Button-1>", lambda e: open_gist())
+        
         def copy():
             self.clipboard_clear()
-            self.clipboard_append(encrypted_content)
+            self.clipboard_append(json_content)
             self.update()
             messagebox.showinfo("복사 완료", "클립보드에 복사되었습니다.\nGist에 붙여넣으세요.")
             
-        ttk.Button(dialog, text="모두 복사", command=copy, bootstyle="primary").pack(pady=10)
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text="모두 복사", command=copy, bootstyle="primary").pack(side=LEFT, padx=5)
+        ttk.Button(btn_frame, text="닫기", command=dialog.destroy, bootstyle="secondary").pack(side=LEFT, padx=5)
 class ExportDialog(tk.Toplevel):
     def __init__(self, parent, total_pages, selected_count):
         super().__init__(parent)
@@ -1203,7 +1223,7 @@ class ExportDialog(tk.Toplevel):
         
         self.ent_custom = ttk.Entry(f_custom, textvariable=self.var_custom, state="disabled")
         self.ent_custom.pack(side=LEFT, padx=5, fill=X, expand=YES)
-        ttk.Label(lf_range, text="예: 1, 3-5, 8", font=("Segoe UI", 8), bootstyle="secondary").pack(anchor=W, padx=25)
+        ttk.Label(lf_range, text="예: 1, 3-5, 8", font=("맑은 고딕", 8), bootstyle="secondary").pack(anchor=W, padx=25)
         
         # 3. Buttons
         f_btn = ttk.Frame(self, padding=pad)
@@ -1258,9 +1278,9 @@ class MergeOrderingDialog(tk.Toplevel):
         f_list = ttk.Frame(self, padding=10)
         f_list.pack(fill=BOTH, expand=YES)
         
-        ttk.Label(f_list, text="병합할 파일 순서를 조정하세요:", font=("Segoe UI", 10, "bold")).pack(anchor=W, pady=5)
+        ttk.Label(f_list, text="병합할 파일 순서를 조정하세요:", font=("맑은 고딕", 10, "bold")).pack(anchor=W, pady=5)
         
-        self.listbox = tk.Listbox(f_list, selectmode=SINGLE, font=("Segoe UI", 9))
+        self.listbox = tk.Listbox(f_list, selectmode=SINGLE, font=("맑은 고딕", 9))
         self.listbox.pack(side=LEFT, fill=BOTH, expand=YES)
         
         scroll = ttk.Scrollbar(f_list, orient=VERTICAL, command=self.listbox.yview)

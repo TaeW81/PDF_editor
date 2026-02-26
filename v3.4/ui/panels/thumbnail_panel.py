@@ -20,7 +20,7 @@ class ThumbnailPanel(ttk.Frame):
         self.dragged_item = None
         
         # UI Components
-        self.lbl_title = ttk.Label(self, text="썸네일", font=("Segoe UI", 10, "bold"), bootstyle="inverse-secondary", padding=5)
+        self.lbl_title = ttk.Label(self, text="썸네일", font=("맑은 고딕", 10, "bold"), bootstyle="inverse-secondary", padding=5)
         self.lbl_title.pack(fill=X)
         
         self.canvas = tk.Canvas(self, bg="#f0f0f0") 
@@ -118,7 +118,7 @@ class ThumbnailPanel(ttk.Frame):
                     lbl_img = ttk.Label(frame, text="Error", width=10)
                     lbl_img.pack(side=TOP, pady=2)
                 
-                lbl_num = ttk.Label(frame, text=f"{i+1}", font=("Segoe UI", 9))
+                lbl_num = ttk.Label(frame, text=f"{i+1}", font=("맑은 고딕", 9))
                 lbl_num.pack(side=BOTTOM)
                 self._bind_events(lbl_num, i)
                 

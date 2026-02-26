@@ -12,7 +12,7 @@ class PreviewPanel(ttk.Frame):
         self.photo_image = None
         
         # UI Components
-        self.lbl_title = ttk.Label(self, text="Preview", font=("Segoe UI", 10, "bold"), bootstyle="inverse-dark", padding=5)
+        self.lbl_title = ttk.Label(self, text="Preview", font=("맑은 고딕", 10, "bold"), bootstyle="inverse-dark", padding=5)
         self.lbl_title.pack(fill=X)
         
         self.canvas = tk.Canvas(self, bg="#555555")
@@ -206,7 +206,7 @@ class PreviewPanel(ttk.Frame):
                 self.canvas.create_image(x, y, anchor="center", image=self.logo_image, tags="logo")
             else:
                 self.canvas.delete("all")
-                self.canvas.create_text(200, 200, text="Kunhwa PDF Editor", font=("Segoe UI", 20, "bold"), fill="gray", tags="logo")
+                self.canvas.create_text(200, 200, text="Kunhwa PDF Editor", font=("맑은 고딕", 20, "bold"), fill="gray", tags="logo")
                 
         except Exception as e:
              print(f"Logo error: {e}")
